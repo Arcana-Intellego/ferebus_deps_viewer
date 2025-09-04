@@ -2,7 +2,7 @@
 <meta charset="utf-8" />
 <title>Deps Viewer — Force Graph</title>
 <style>
-  :root { --bg:#0b0e12; --panel:#12161d; --text:#d8dee9; --muted:#9aa4b2; --link:#6aa0ff; }
+  :root { --bg:#0b0e12; --panel:#12161d; --text:#d8dee9; --muted:#9aa4b2; }
   html, body { height:100%; margin:0; background:var(--bg); color:var(--text); font:13px/1.4 system-ui, Segoe UI, Roboto, sans-serif; }
   #app { display:grid; grid-template-columns: 320px 1fr; height:100%; }
   #panel { background:var(--panel); border-right:1px solid #1e2530; padding:12px 14px; overflow:auto; }
@@ -13,19 +13,27 @@
   #controls label { display:block; font-weight:600; margin-bottom:4px; }
   #controls select, #controls input { width:100%; background:#0f1319; color:var(--text); border:1px solid #1b222e; border-radius:6px; padding:6px; }
   svg { width:100%; height:100%; display:block; }
-  .link { stroke:#7a8597; stroke-opacity:.25; }
-  .link.highlight { stroke:#fff; stroke-opacity:.9; }
+  .link { stroke-opacity:.28; vector-effect: non-scaling-stroke; } /* keep stroke width constant on zoom */
+  .link.highlight { stroke:#fff; stroke-opacity:.95; }
   .node { cursor:grab; }
   .node:hover { stroke:#fff; stroke-width:1.5px; }
   .label { pointer-events:none; font-size:10px; fill:#cbd5e1; text-shadow: 0 1px 2px #000; opacity:.85 }
+  .legend { display:grid; grid-template-columns: 16px auto; gap:8px 10px; align-items:center; margin-top:10px; }
+  .legend .row { display:contents; }
+  .swatch { width:12px; height:12px; border-radius:3px; }
+  .legend input { margin-right:6px; vertical-align:middle; }
+  .legend .name { vertical-align:middle; }
 </style>
+
 <div id="app">
   <aside id="panel">
     <h1>Dependency Graph</h1>
+
     <div id="controls">
       <div>
         <label for="edgeType">Edge type</label>
         <select id="edgeType">
+          <option>all</option>
           <option>call</option>
           <option>use</option>
           <option>module-procedure-of</option>
@@ -41,11 +49,15 @@
         <label><input type="checkbox" id="labels" checked> Show labels</label>
       </div>
     </div>
-    <div class="muted">Hover a node to see details</div>
-    <div id="info"></div>
+
+    <div class="muted">Toggle edge types:</div>
+    <div id="legend" class="legend"></div>
+
+    <div class="muted" style="margin-top:10px">Hover a node to see details</div>
+    <div id="info" style="margin-top:6px;"></div>
   </aside>
+
   <svg id="viz"></svg>
 </div>
+
 <script type="module" src="./bundle.js"></script>
-
-
