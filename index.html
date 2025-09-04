@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Deps Viewer — Force Graph</title>
+<style>
+  :root { --bg:#0b0e12; --panel:#12161d; --text:#d8dee9; --muted:#9aa4b2; --link:#6aa0ff; }
+  html, body { height:100%; margin:0; background:var(--bg); color:var(--text); font:13px/1.4 system-ui, Segoe UI, Roboto, sans-serif; }
+  #app { display:grid; grid-template-columns: 320px 1fr; height:100%; }
+  #panel { background:var(--panel); border-right:1px solid #1e2530; padding:12px 14px; overflow:auto; }
+  #panel h1 { margin:4px 0 8px; font-size:14px; font-weight:600; }
+  #panel .muted { color:var(--muted); }
+  #panel pre { white-space:pre-wrap; word-break:break-word; background:#0f1319; border:1px solid #1b222e; padding:8px; border-radius:6px; overflow:auto;}
+  #controls { display:grid; gap:8px; margin-bottom:10px; }
+  #controls label { display:block; font-weight:600; margin-bottom:4px; }
+  #controls select, #controls input { width:100%; background:#0f1319; color:var(--text); border:1px solid #1b222e; border-radius:6px; padding:6px; }
+  svg { width:100%; height:100%; display:block; }
+  .link { stroke:#7a8597; stroke-opacity:.25; }
+  .link.highlight { stroke:#fff; stroke-opacity:.9; }
+  .node { cursor:grab; }
+  .node:hover { stroke:#fff; stroke-width:1.5px; }
+  .label { pointer-events:none; font-size:10px; fill:#cbd5e1; text-shadow: 0 1px 2px #000; opacity:.85 }
+</style>
+<div id="app">
+  <aside id="panel">
+    <h1>Dependency Graph</h1>
+    <div id="controls">
+      <div>
+        <label for="edgeType">Edge type</label>
+        <select id="edgeType">
+          <option>call</option>
+          <option>use</option>
+          <option>module-procedure-of</option>
+          <option>binds-to</option>
+          <option>uses-type</option>
+        </select>
+      </div>
+      <div>
+        <label for="filter">Filter (contains)</label>
+        <input id="filter" placeholder="type a substring e.g. stella" />
+      </div>
+      <div>
+        <label><input type="checkbox" id="labels" checked> Show labels</label>
+      </div>
+    </div>
+    <div class="muted">Hover a node to see details</div>
+    <div id="info"></div>
+  </aside>
+  <svg id="viz"></svg>
+</div>
+<script type="module" src="./bundle.js"></script>
+
+

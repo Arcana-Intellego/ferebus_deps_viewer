@@ -1,0 +1,7 @@
+ 
+<!doctype html>
+<meta charset="utf-8" />
+<title>Deps Viewer</title>
+<style>html,body,svg{margin:0;padding:0;width:100%;height:100%}</style>
+<svg id="viz"></svg>
+<script type="module" src="./bundle.js"></script>

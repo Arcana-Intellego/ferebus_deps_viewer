@@ -1,0 +1,31 @@
+mport * as d3 from "d3";
+import { sugiyama, graphConnect, decrossTwoLayer, coordCenter } from "d3-dag";
+
+const deps = await fetch("./deps.json").then(r => r.json());
+const TYPE = "call";
+const edges = Array.from(new Set(
+	  deps.links.filter(d => d.type === TYPE).map(d => `${d.source}\t${d.target}`)
+)).map(s => s.split("\t"));
+
+const graph = graphConnect()(edges);
+const layout = sugiyama()
+  .nodeSize([8,18]).gap([6,40])
+  .decross(decrossTwoLayer())
+  .coord(coordCenter());
+const { width, height } = layout(graph);
+
+const svg = d3.select("#viz"), g = svg.append("g");
+svg.attr("viewBox", `0 0 ${width} ${height}`)
+   .call(d3.zoom().on("zoom", ev => g.attr("transform", ev.transform)));
+
+const line = d3.line().curve(d3.curveCatmullRom.alpha(0.5));
+
+g.append("g").selectAll("path")
+  .data([...graph.links()]).join("path")
+  .attr("fill","none").attr("stroke","#999").attr("stroke-opacity",0.6)
+  .attr("d", d => line(d.points));
+
+g.append("g").selectAll("circle")
+  .data([...graph.nodes()]).join("circle")
+  .attr("r",2.5).attr("cx", d => d.x).attr("cy", d => d.y)
+  .append("title").text(d => d.id);
