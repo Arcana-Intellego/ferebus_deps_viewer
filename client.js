@@ -1,7 +1,6 @@
 import * as d3 from "d3";
 
 /* =========== Palettes =========== */
-// Edge colors
 const COLORS = {
   blue:   "#60a5fa",
   green:  "#34d399",
@@ -23,15 +22,15 @@ const EDGE_COLORS = {
   "uses-type":           COLORS.purple
 };
 
-// Node colors aligned with edge semantics
+// Node palette aligned with edge semantics
 function colorByKind(kind) {
   switch ((kind || "unknown").toLowerCase()) {
     case "function":
-    case "subroutine": return COLORS.blue;     // aligns with call
-    case "module":     return COLORS.green;    // aligns with use
+    case "subroutine": return COLORS.blue;    // aligns with call
+    case "module":     return COLORS.green;   // aligns with use
     case "interface":
-    case "generic":    return COLORS.amber;    // aligns with module-procedure-of
-    case "type":       return COLORS.purple;   // aligns with uses-type
+    case "generic":    return COLORS.amber;   // aligns with module-procedure-of
+    case "type":       return COLORS.purple;  // aligns with uses-type
     case "program":    return COLORS.slate;
     default:           return COLORS.light;
   }
@@ -54,11 +53,12 @@ const edgeTypeSel = document.querySelector("#edgeType");
 const filterInput = document.querySelector("#filter");
 const labelsToggle = document.querySelector("#labels");
 const legendEl = document.querySelector("#legend");
+const legendKindsEl = document.querySelector("#legendKinds");
 
-/* =========== Legend (checkbox toggles) =========== */
+/* =========== Legends =========== */
 const activeTypes = new Set(EDGE_TYPES);
 
-function renderLegend() {
+function renderEdgeLegend() {
   legendEl.innerHTML = "";
   const inAllMode = edgeTypeSel.value === "all";
   for (const t of EDGE_TYPES) {
@@ -85,6 +85,29 @@ function renderLegend() {
     row.appendChild(cb);
     row.appendChild(label);
     legendEl.appendChild(row);
+  }
+}
+
+function renderNodeKindLegend() {
+  legendKindsEl.innerHTML = "";
+  const kinds = [
+    ["function / subroutine", colorByKind("function")],
+    ["module",                colorByKind("module")],
+    ["interface / generic",   colorByKind("interface")],
+    ["type",                  colorByKind("type")],
+    ["program",               colorByKind("program")],
+    ["other / unknown",       colorByKind("unknown")]
+  ];
+  for (const [name, col] of kinds) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = col;
+    const lab = document.createElement("label");
+    lab.appendChild(sw);
+    lab.appendChild(document.createTextNode(name));
+    legendKindsEl.appendChild(lab);
   }
 }
 
@@ -148,20 +171,21 @@ function buildGraph(edgeType, query) {
 }
 
 /* =========== Markers (arrowheads) =========== */
-/* Use markerUnits="strokeWidth" so arrows follow stroke width,
-   which we keep constant on screen via vector-effect: non-scaling-stroke.  */
+/* We keep link strokes constant on screen via vector-effect: non-scaling-stroke.
+   Using markerUnits="strokeWidth" makes arrowheads scale with that stroke width,
+   so they also remain constant on screen with zoom. */
 function ensureMarkers() {
   gDefs.selectAll("marker").remove();
   for (const t of EDGE_TYPES) {
     const m = gDefs.append("marker")
       .attr("id", `arrow-${t}`)
-      .attr("markerUnits", "strokeWidth")       // scales with stroke width (screen-constant) :contentReference[oaicite:2]{index=2}
+      .attr("markerUnits", "strokeWidth")
       .attr("viewBox", "0 -3 6 6")
-      .attr("refX", 6)                           // 6 = arrow tip x; aligns tip with line end
+      .attr("refX", 6)                // tip sits at line end
       .attr("refY", 0)
       .attr("markerWidth", 6)
       .attr("markerHeight", 6)
-      .attr("orient", "auto");
+      .attr("orient", "auto-start-reverse"); // handle start/end automatically
     m.append("path")
       .attr("d", "M0,-3 L6,0 L0,3 Z")
       .attr("fill", colorByType(t));
@@ -172,18 +196,19 @@ function ensureMarkers() {
 const zoom = d3.zoom().on("zoom", (ev) => {
   gMain.attr("transform", ev.transform);
 });
-svg.call(zoom); // d3-zoom docs: transform has k/tx/ty; use for pan+zoom. :contentReference[oaicite:3]{index=3}
+svg.call(zoom);
 
 /* =========== Main render / simulation =========== */
 function run(edgeType = "all", query = "") {
-  renderLegend();
+  renderEdgeLegend();
+  renderNodeKindLegend();
   ensureMarkers();
 
   const { nodes, links } = buildGraph(edgeType, query);
 
   const sim = d3.forceSimulation(nodes)
     .force("charge", d3.forceManyBody().strength(d => (d.kind === "module" ? -220 : -90)))
-    .force("link", d3.forceLink(links).id(nodeKey).distance(d => 42 + 2*Math.min(d.source.degree,d.target.degree)).strength(0.35)) // id accessor: JSON-friendly. :contentReference[oaicite:4]{index=4}
+    .force("link", d3.forceLink(links).id(nodeKey).distance(d => 42 + 2*Math.min(d.source.degree,d.target.degree)).strength(0.35))
     .force("collide", d3.forceCollide().radius(d => 4 + Math.sqrt(2 + d.degree)).iterations(2))
     .force("x", d3.forceX().strength(0.06))
     .force("y", d3.forceY().strength(0.06));
@@ -196,6 +221,9 @@ function run(edgeType = "all", query = "") {
     .attr("stroke-width", 1.2);
   const link = linkEnter.merge(linkSel)
     .attr("stroke", d => colorByType(d.etype))
+    // REVERSED DIRECTION: arrow at *start* or *end*?
+    // We'll draw the path from TARGET → SOURCE and put arrow at marker-end,
+    // so the arrow points toward the SOURCE (dependent).
     .attr("marker-end", d => `url(#arrow-${d.etype})`);
 
   const nodeSel = gNodes.selectAll("circle").data(nodes, nodeKey);
@@ -207,7 +235,7 @@ function run(edgeType = "all", query = "") {
     .attr("stroke", "#0b0e12")
     .attr("stroke-width", 0.75)
     .call(
-      d3.drag() // drag behavior. :contentReference[oaicite:5]{index=5}
+      d3.drag()
         .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.2).restart(); d.fx = d.x; d.fy = d.y; })
         .on("drag",  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
         .on("end",   (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
@@ -275,33 +303,30 @@ function run(edgeType = "all", query = "") {
   function countByType(arr){ const m = Object.create(null); for (const l of arr) m[l.etype]=(m[l.etype]||0)+1; return m; }
   function escapeHtml(s){return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 
-  // --- ticks: shorten links to node boundary so arrows don't sit under nodes ---
-  const ARROW_GAP = 2; // extra clearance from the node outline
+  // --- ticks: draw line from TARGET → SOURCE so arrow (marker-end) points to SOURCE ---
   sim.on("tick", () => {
     link
       .attr("x1", d => {
-        const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+        const dx = d.source.x - d.target.x, dy = d.source.y - d.target.y;
         const L = Math.hypot(dx, dy) || 1;
-        const ox = (dx / L) * (nodeRadius(d.source) + ARROW_GAP);
-        return d.source.x + ox;
+        // start at target boundary (no extra gap)
+        return d.target.x + (dx / L) * nodeRadius(d.target);
       })
       .attr("y1", d => {
-        const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+        const dx = d.source.x - d.target.x, dy = d.source.y - d.target.y;
         const L = Math.hypot(dx, dy) || 1;
-        const oy = (dy / L) * (nodeRadius(d.source) + ARROW_GAP);
-        return d.source.y + oy;
+        return d.target.y + (dy / L) * nodeRadius(d.target);
       })
       .attr("x2", d => {
-        const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+        const dx = d.source.x - d.target.x, dy = d.source.y - d.target.y;
         const L = Math.hypot(dx, dy) || 1;
-        const ox = (dx / L) * (nodeRadius(d.target) + ARROW_GAP);
-        return d.target.x - ox;
+        // end at source boundary so arrow tip kisses the source node
+        return d.source.x - (dx / L) * nodeRadius(d.source);
       })
       .attr("y2", d => {
-        const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+        const dx = d.source.x - d.target.x, dy = d.source.y - d.target.y;
         const L = Math.hypot(dx, dy) || 1;
-        const oy = (dy / L) * (nodeRadius(d.target) + ARROW_GAP);
-        return d.target.y - oy;
+        return d.source.y - (dy / L) * nodeRadius(d.source);
       });
 
     node.attr("cx", d => d.x).attr("cy", d => d.y);

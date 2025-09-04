@@ -12,15 +12,15 @@
   #controls { display:grid; gap:8px; margin-bottom:10px; }
   #controls label { display:block; font-weight:600; margin-bottom:4px; }
   #controls select, #controls input { width:100%; background:#0f1319; color:var(--text); border:1px solid #1b222e; border-radius:6px; padding:6px; }
-  #legend { display:grid; grid-template-columns: auto 1fr; gap:8px 8px; align-items:center; margin:8px 0 0; }
-  #legend .row { display:contents; opacity:0.95; }
+  #legend, #legendKinds { display:grid; grid-template-columns: auto 1fr; gap:8px 8px; align-items:center; margin:8px 0 0; }
+  #legend .row, #legendKinds .row { display:contents; opacity:0.95; }
   #legend input[type="checkbox"] { width:14px; height:14px; margin:0; }
-  #legend label { display:flex; align-items:center; gap:8px; user-select:none; }
-  #legend .swatch { width:14px; height:14px; border-radius:3px; display:inline-block; }
-  #legend .disabled { opacity:0.35; }
+  #legend label, #legendKinds label { display:flex; align-items:center; gap:8px; user-select:none; }
+  .swatch { width:14px; height:14px; border-radius:3px; display:inline-block; }
+  .disabled { opacity:0.35; }
   svg { width:100%; height:100%; display:block; }
-  .link { stroke-opacity:.28; vector-effect: non-scaling-stroke; }
-  .link.highlight { stroke:#fff; stroke-opacity:.95; }
+  .link { stroke-opacity:.28; vector-effect: non-scaling-stroke; } /* color set in JS */
+  .link.highlight { stroke-opacity:.95; } /* don't force white; just raise opacity */
   .node { cursor:grab; }
   .node:hover { stroke:#fff; stroke-width:1.5px; }
   .label { pointer-events:none; font-size:10px; fill:#cbd5e1; text-shadow: 0 1px 2px #000; opacity:.85 }
@@ -56,6 +56,9 @@
     <div class="muted">Toggle edge types (active only when “all” is selected):</div>
     <div id="legend"></div>
 
+    <div class="muted" style="margin-top:10px">Node kinds:</div>
+    <div id="legendKinds"></div>
+
     <div class="muted" style="margin-top:10px">Hover a node to see details</div>
     <div id="info" style="margin-top:8px;"></div>
   </aside>
@@ -64,3 +67,4 @@
 </div>
 
 <script type="module" src="./bundle.js"></script>
+
