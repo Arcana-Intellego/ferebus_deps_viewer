@@ -43,7 +43,7 @@ const deps = await fetch("./deps.json").then(r => r.json());
 /* =========== DOM refs & layers =========== */
 const svg = d3.select("#viz");
 const gMain   = svg.append("g");
-/* Order matters: links above nodes so strokes sit over the node’s white hover ring */
+/* Order: links ABOVE nodes so strokes sit over the node’s white hover ring */
 const gLinks  = gMain.append("g");
 const gNodes  = gMain.append("g");
 const gArrows = gMain.append("g");   // arrow overlay above nodes
@@ -127,16 +127,12 @@ function filterNodes(nodes, q) {
   );
 }
 
-function nodeRadius(d) {
-  return 3 + Math.sqrt(1 + (d.degree || 0));
-}
+function nodeRadius(d) { return 3 + Math.sqrt(1 + (d.degree || 0)); }
 
 function buildGraph(edgeType, query) {
   const nodesById = new Map(deps.nodes.map(n => [n.id, { ...n }]));
 
-  let types;
-  if (edgeType === "all") types = [...activeTypes];
-  else types = [edgeType];
+  const types = edgeType === "all" ? [...activeTypes] : [edgeType];
 
   const uniq = new Set();
   const links = [];
@@ -173,17 +169,22 @@ function buildGraph(edgeType, query) {
 
 /* =========== Zoom / Pan =========== */
 let zoomK = 1;               // current zoom (for screen-constant arrows)
-let onZoomRepaint = null;    // set by run() to refresh arrows immediately
-
+let onZoomRepaint = null;    // assigned by run() to refresh arrows immediately
 const zoom = d3.zoom().on("zoom", (ev) => {
   zoomK = ev.transform.k;
   gMain.attr("transform", ev.transform);
-  if (onZoomRepaint) onZoomRepaint(); // recompute arrow paths at this zoom
+  if (onZoomRepaint) onZoomRepaint(); // keep arrows sized/positioned on pan/zoom
 });
-svg.call(zoom);  // d3-zoom behavior docs. :contentReference[oaicite:2]{index=2}
+svg.call(zoom);
+
+/* Track the current simulation so we can stop it on rerun */
+let currentSim = null;
 
 /* =========== Main render / simulation =========== */
 function run(edgeType = "all", query = "") {
+  // stop any previous simulation to avoid competing ticks
+  if (currentSim) currentSim.stop();
+
   renderEdgeLegend();
   renderNodeKindLegend();
 
@@ -195,14 +196,15 @@ function run(edgeType = "all", query = "") {
     .force("collide", d3.forceCollide().radius(d => 4 + Math.sqrt(2 + d.degree)).iterations(2))
     .force("x", d3.forceX().strength(0.06))
     .force("y", d3.forceY().strength(0.06));
+  currentSim = sim;
 
+  // --- joins ---
   const linkSel = gLinks.selectAll("line").data(links, d => d.source.id + "→" + d.target.id + ":" + d.etype);
   linkSel.exit().remove();
   const linkEnter = linkSel.enter().append("line")
     .attr("class", "link")
     .attr("stroke-width", 1.2);
-  const link = linkEnter.merge(linkSel)
-    .attr("stroke", d => colorByType(d.etype));
+  const link = linkEnter.merge(linkSel).attr("stroke", d => colorByType(d.etype));
 
   const nodeSel = gNodes.selectAll("circle").data(nodes, nodeKey);
   nodeSel.exit().remove();
@@ -212,13 +214,12 @@ function run(edgeType = "all", query = "") {
     .attr("fill", d => colorByKind(d.kind))
     .attr("stroke", "#0b0e12")
     .attr("stroke-width", 0.75)
-    // Stop the initial pointerdown from bubbling to the zoom, so drag always wins
-    // (D3 drag doesn’t stop propagation for you by default). :contentReference[oaicite:3]{index=3}
+    // Ensure drag always wins over zoom: block the initial pointerdown and dragstart. 
     .on("pointerdown", (ev) => ev.stopPropagation())
     .call(
       d3.drag()
         .on("start", (ev, d) => {
-          ev.sourceEvent?.stopPropagation(); // belt & braces; works with older patterns. :contentReference[oaicite:4]{index=4}
+          ev.sourceEvent?.stopPropagation(); // also guard older patterns
           if (!ev.active) sim.alphaTarget(0.2).restart();
           d.fx = d.x; d.fy = d.y;
         })
@@ -228,10 +229,9 @@ function run(edgeType = "all", query = "") {
     .on("mouseenter", (_, d) => showInfo(d, links))
     .on("mouseleave", () => clearHighlight())
     .on("mousemove", (ev, d) => maybeHighlight(d));
-
   const node = nodeEnter.merge(nodeSel);
 
-  // Arrowheads as overlay triangles (above nodes), one per link
+  // Arrowheads as overlay triangles (above nodes)
   const arrowSel = gArrows.selectAll("path").data(links, d => d.source.id + "→" + d.target.id + ":" + d.etype);
   arrowSel.exit().remove();
   const arrow = arrowSel.enter().append("path")
@@ -273,29 +273,7 @@ function run(edgeType = "all", query = "") {
     label.attr("opacity", labelsToggle.checked ? 1 : 0);
   }
 
-  // --- info panel ---
-  function showInfo(d, links) {
-    const incoming = links.filter(l => l.target.id === d.id);
-    const outgoing = links.filter(l => l.source.id === d.id);
-    const details = {
-      id: d.id, name: d.name, kind: d.kind, scope: d.scope,
-      file: d.file, line: d.line, visibility: d.visibility,
-      attrs: d.attrs, result: d.result, dummies: d.dummies,
-      in_degree: incoming.length, out_degree: outgoing.length,
-      in_by_type:  countByType(incoming),
-      out_by_type: countByType(outgoing)
-    };
-    info.innerHTML = `
-      <h1>${d.name || d.id}</h1>
-      <div class="muted">${d.kind}${d.scope ? ` — scope: ${d.scope}` : ""}</div>
-      <div style="margin:8px 0">in: <b>${incoming.length}</b> • out: <b>${outgoing.length}</b></div>
-      <pre>${escapeHtml(JSON.stringify(details, null, 2))}</pre>
-    `;
-  }
-  function countByType(arr){ const m = Object.create(null); for (const l of arr) m[l.etype]=(m[l.etype]||0)+1; return m; }
-  function escapeHtml(s){return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-
-  // --- geometry helpers (reused by tick & zoom repaint) ---
+  // --- geometry helpers (used by tick & zoom repaint) ---
   function endpoints(d) {
     // REVERSED DIRECTION: line drawn TARGET → SOURCE
     const vx = d.source.x - d.target.x;
@@ -311,32 +289,41 @@ function run(edgeType = "all", query = "") {
     return { x1, y1, x2, y2, ux, uy };
   }
 
-  function arrowPath(d) {
-    const { x2, y2, ux, uy } = endpoints(d);
-    const ARW   = 6 / zoomK;     // length
+  function arrowPath(d, ends) {
+    const { x2, ux, uy } = ends;
+    const ARW   = 6 / zoomK;     // length (screen-constant)
     const HALF  = 3.6 / zoomK;   // half width
     const bx = x2 - ux * ARW;
-    const by = y2 - uy * ARW;
+    const by = ends.y2 - uy * ARW;
     const px = -uy, py = ux;
 
     const b1x = bx + px * HALF, b1y = by + py * HALF;
     const b2x = bx - px * HALF, b2y = by - py * HALF;
-    return `M${x2},${y2} L${b1x},${b1y} L${b2x},${b2y} Z`;
+    return `M${ends.x2},${ends.y2} L${b1x},${b1y} L${b2x},${b2y} Z`;
   }
 
+  // Single repaint used by both tick and zoom:
   function repaint() {
+    // links & arrows
     link
-      .attr("x1", d => endpoints(d).x1)
-      .attr("y1", d => endpoints(d).y1)
-      .attr("x2", d => endpoints(d).x2)
-      .attr("y2", d => endpoints(d).y2);
+      .attr("x1", d => {
+        const e = (d._e = endpoints(d));
+        return e.x1;
+      })
+      .attr("y1", d => d._e.y1)
+      .attr("x2", d => d._e.x2)
+      .attr("y2", d => d._e.y2);
 
-    arrow.attr("d", arrowPath);
+    arrow.attr("d", d => arrowPath(d, d._e));
+
+    // nodes & labels (these were missing before)
+    node.attr("cx", d => d.x).attr("cy", d => d.y);
+    label.attr("x", d => d.x).attr("y", d => d.y);
   }
 
   // --- ticks & immediate zoom repaint ---
   sim.on("tick", repaint);
-  onZoomRepaint = repaint; // when zooming, recompute arrow size/position immediately
+  onZoomRepaint = repaint;
 
   label.attr("opacity", labelsToggle.checked ? 1 : 0);
 
