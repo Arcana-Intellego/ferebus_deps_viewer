@@ -214,8 +214,8 @@ function run(edgeType = "all", query = "") {
     .force("charge", d3.forceManyBody().strength(d => (d.kind === "module" ? -300 : -140)))
     .force("link", d3.forceLink(links).id(nodeKey).distance(d => 42 + 2*Math.min(d.source.degree,d.target.degree)).strength(0.15))
     .force("collide", d3.forceCollide().radius(d => 6 + Math.sqrt(2 + d.degree)).iterations(2))
-    .force("x", d3.forceX().strength(0.06))
-    .force("y", d3.forceY().strength(0.06));
+    .force("x", d3.forceX().strength(0.00))
+    .force("y", d3.forceY().strength(0.00));
   currentSim = sim;
 
   // --- joins ---
