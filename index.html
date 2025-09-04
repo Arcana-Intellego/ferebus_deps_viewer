@@ -12,17 +12,18 @@
   #controls { display:grid; gap:8px; margin-bottom:10px; }
   #controls label { display:block; font-weight:600; margin-bottom:4px; }
   #controls select, #controls input { width:100%; background:#0f1319; color:var(--text); border:1px solid #1b222e; border-radius:6px; padding:6px; }
+  #legend { display:grid; grid-template-columns: auto 1fr; gap:8px 8px; align-items:center; margin:8px 0 0; }
+  #legend .row { display:contents; opacity:0.95; }
+  #legend input[type="checkbox"] { width:14px; height:14px; margin:0; }
+  #legend label { display:flex; align-items:center; gap:8px; user-select:none; }
+  #legend .swatch { width:14px; height:14px; border-radius:3px; display:inline-block; }
+  #legend .disabled { opacity:0.35; }
   svg { width:100%; height:100%; display:block; }
-  .link { stroke-opacity:.28; vector-effect: non-scaling-stroke; } /* keep stroke width constant on zoom */
+  .link { stroke-opacity:.28; vector-effect: non-scaling-stroke; }
   .link.highlight { stroke:#fff; stroke-opacity:.95; }
   .node { cursor:grab; }
   .node:hover { stroke:#fff; stroke-width:1.5px; }
   .label { pointer-events:none; font-size:10px; fill:#cbd5e1; text-shadow: 0 1px 2px #000; opacity:.85 }
-  .legend { display:grid; grid-template-columns: 16px auto; gap:8px 10px; align-items:center; margin-top:10px; }
-  .legend .row { display:contents; }
-  .swatch { width:12px; height:12px; border-radius:3px; }
-  .legend input { margin-right:6px; vertical-align:middle; }
-  .legend .name { vertical-align:middle; }
 </style>
 
 <div id="app">
@@ -41,20 +42,22 @@
           <option>uses-type</option>
         </select>
       </div>
+
       <div>
         <label for="filter">Filter (contains)</label>
         <input id="filter" placeholder="type a substring e.g. stella" />
       </div>
+
       <div>
         <label><input type="checkbox" id="labels" checked> Show labels</label>
       </div>
     </div>
 
-    <div class="muted">Toggle edge types:</div>
-    <div id="legend" class="legend"></div>
+    <div class="muted">Toggle edge types (only active when “all” is selected):</div>
+    <div id="legend"></div>
 
     <div class="muted" style="margin-top:10px">Hover a node to see details</div>
-    <div id="info" style="margin-top:6px;"></div>
+    <div id="info" style="margin-top:8px;"></div>
   </aside>
 
   <svg id="viz"></svg>
