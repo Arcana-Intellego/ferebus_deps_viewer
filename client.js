@@ -1,26 +1,50 @@
 import * as d3 from "d3";
 
-// ---------- Edge types & colors ----------
-const EDGE_TYPES = ["call", "use", "module-procedure-of", "binds-to", "uses-type"];
-const TYPE_ALIAS = new Map([["module_procedure_of", "module-procedure-of"]]);
-const EDGE_COLORS = {
-  "call":               "#6aa0ff",
-  "use":                "#7bd389",
-  "module-procedure-of":"#f59e0b",
-  "binds-to":           "#ef4444",
-  "uses-type":          "#a78bfa"
+/* =========== Palettes =========== */
+// Edge colors
+const COLORS = {
+  blue:   "#60a5fa",
+  green:  "#34d399",
+  amber:  "#f59e0b",
+  red:    "#ef4444",
+  purple: "#a78bfa",
+  slate:  "#94a3b8",
+  light:  "#cbd5e1"
 };
 
-// active types for the legend (all on by default)
-const activeTypes = new Set(EDGE_TYPES);
+const EDGE_TYPES = ["call", "use", "module-procedure-of", "binds-to", "uses-type"];
+const TYPE_ALIAS = new Map([["module_procedure_of", "module-procedure-of"]]);
 
-// ---------- Load data ----------
+const EDGE_COLORS = {
+  "call":                COLORS.blue,
+  "use":                 COLORS.green,
+  "module-procedure-of": COLORS.amber,
+  "binds-to":            COLORS.red,
+  "uses-type":           COLORS.purple
+};
+
+// Node colors aligned with edge semantics
+function colorByKind(kind) {
+  switch ((kind || "unknown").toLowerCase()) {
+    case "function":
+    case "subroutine": return COLORS.blue;     // aligns with call
+    case "module":     return COLORS.green;    // aligns with use
+    case "interface":
+    case "generic":    return COLORS.amber;    // aligns with module-procedure-of
+    case "type":       return COLORS.purple;   // aligns with uses-type
+    case "program":    return COLORS.slate;
+    default:           return COLORS.light;
+  }
+}
+const colorByType = (t) => EDGE_COLORS[t] || "#999";
+
+/* =========== Data =========== */
 const deps = await fetch("./deps.json").then(r => r.json());
 
-// ---------- DOM refs ----------
+/* =========== DOM refs =========== */
 const svg = d3.select("#viz");
 const gMain  = svg.append("g");
-const gDefs  = svg.append("defs");        // for markers
+const gDefs  = svg.append("defs");   // markers
 const gLinks = gMain.append("g");
 const gNodes = gMain.append("g");
 const gLabels= gMain.append("g");
@@ -31,12 +55,40 @@ const filterInput = document.querySelector("#filter");
 const labelsToggle = document.querySelector("#labels");
 const legendEl = document.querySelector("#legend");
 
-// ---------- Helpers ----------
-const colorByType = (t) => EDGE_COLORS[t] || "#999";
-const colorByKind = d3.scaleOrdinal()
-  .domain(["module","program","subroutine","function","interface","generic","type","unknown"])
-  .range(d3.schemeTableau10);
+/* =========== Legend (checkbox toggles) =========== */
+const activeTypes = new Set(EDGE_TYPES);
 
+function renderLegend() {
+  legendEl.innerHTML = "";
+  const inAllMode = edgeTypeSel.value === "all";
+  for (const t of EDGE_TYPES) {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = activeTypes.has(t);
+    cb.disabled = !inAllMode;
+    cb.addEventListener("change", () => {
+      if (cb.checked) activeTypes.add(t); else activeTypes.delete(t);
+      run(edgeTypeSel.value, filterInput.value);
+    });
+
+    const label = document.createElement("label");
+    if (!inAllMode) label.classList.add("disabled");
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = colorByType(t);
+
+    label.appendChild(swatch);
+    label.appendChild(document.createTextNode(t));
+    row.appendChild(cb);
+    row.appendChild(label);
+    legendEl.appendChild(row);
+  }
+}
+
+/* =========== Helpers =========== */
 function normType(t) { return TYPE_ALIAS.get(t) || t; }
 function nodeKey(d){ return d.id; }
 
@@ -51,24 +103,22 @@ function filterNodes(nodes, q) {
   );
 }
 
+function nodeRadius(d) {
+  return 3 + Math.sqrt(1 + (d.degree || 0));
+}
+
 function buildGraph(edgeType, query) {
   const nodesById = new Map(deps.nodes.map(n => [n.id, { ...n }]));
 
-  // Decide which link types to include
   let types;
-  if (edgeType === "all") {
-    types = [...activeTypes];
-  } else {
-    types = [edgeType];
-  }
+  if (edgeType === "all") types = [...activeTypes];
+  else types = [edgeType];
 
-  // Collect links (allow parallel edges of different types)
   const uniq = new Set();
   const links = [];
   for (const l of deps.links) {
     const t = normType(l.type);
     if (!types.includes(t)) continue;
-
     const sId = typeof l.source === "string" ? l.source : l.source?.id;
     const tId = typeof l.target === "string" ? l.target : l.target?.id;
     if (!nodesById.has(sId) || !nodesById.has(tId)) continue;
@@ -79,16 +129,14 @@ function buildGraph(edgeType, query) {
     links.push({ source: nodesById.get(sId), target: nodesById.get(tId), etype: t });
   }
 
-  // Induced subgraph by filter query
   const keep = new Set(filterNodes([...nodesById.values()], query).map(n => n.id));
   const filtered = links.filter(l => keep.has(l.source.id) || keep.has(l.target.id));
 
-  // Nodes actually used
   const used = new Set();
   for (const l of filtered) { used.add(l.source.id); used.add(l.target.id); }
   const nodes = [...used].map(id => nodesById.get(id));
 
-  // Degree for sizing
+  // degree for sizing
   const deg = new Map([...used].map(id => [id, 0]));
   for (const l of filtered) {
     deg.set(l.source.id, (deg.get(l.source.id)||0)+1);
@@ -99,94 +147,48 @@ function buildGraph(edgeType, query) {
   return { nodes, links: filtered };
 }
 
-// ---------- Legend (checkbox toggles) ----------
-function renderLegend() {
-  legendEl.innerHTML = ""; // rebuild fresh
-  const inAllMode = edgeTypeSel.value === "all";
-
-  for (const t of EDGE_TYPES) {
-    const row = document.createElement("div");
-    row.className = "row";
-
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = activeTypes.has(t);
-    cb.disabled = !inAllMode;
-    cb.addEventListener("change", () => {
-      if (cb.checked) activeTypes.add(t); else activeTypes.delete(t);
-      run(edgeTypeSel.value, filterInput.value); // live update
-    });
-
-    const label = document.createElement("label");
-    if (!inAllMode) label.classList.add("disabled");
-    const swatch = document.createElement("span");
-    swatch.className = "swatch";
-    swatch.style.background = EDGE_COLORS[t];
-    label.appendChild(swatch);
-    label.appendChild(document.createTextNode(t));
-
-    row.appendChild(cb);
-    row.appendChild(label);
-    legendEl.appendChild(row);
-  }
-}
-
-// ---------- SVG arrow markers (per edge type), scale-proof ----------
-const markerBase = { width: 10, height: 10, refX: 12 }; // logical base (graph units with userSpaceOnUse)
-
+/* =========== Markers (arrowheads) =========== */
+/* Use markerUnits="strokeWidth" so arrows follow stroke width,
+   which we keep constant on screen via vector-effect: non-scaling-stroke.  */
 function ensureMarkers() {
   gDefs.selectAll("marker").remove();
   for (const t of EDGE_TYPES) {
-    gDefs.append("marker")
+    const m = gDefs.append("marker")
       .attr("id", `arrow-${t}`)
-      .attr("markerUnits", "userSpaceOnUse") // size in user space; we will rescale on zoom. MDN. :contentReference[oaicite:0]{index=0}
-      .attr("viewBox", "0 -4 8 8")
-      .attr("refX", markerBase.refX)
+      .attr("markerUnits", "strokeWidth")       // scales with stroke width (screen-constant) :contentReference[oaicite:2]{index=2}
+      .attr("viewBox", "0 -3 6 6")
+      .attr("refX", 6)                           // 6 = arrow tip x; aligns tip with line end
       .attr("refY", 0)
-      .attr("markerWidth", markerBase.width)
-      .attr("markerHeight", markerBase.height)
-      .attr("orient", "auto")
-      .append("path")
-        .attr("d", "M0,-4 L8,0 L0,4 Z")
-        .attr("fill", EDGE_COLORS[t]);
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
+      .attr("orient", "auto");
+    m.append("path")
+      .attr("d", "M0,-3 L6,0 L0,3 Z")
+      .attr("fill", colorByType(t));
   }
 }
 
-// Update marker size inversely with zoom.k so arrowheads stay constant on screen.
-function resizeMarkersForZoom(k) {
-  // keep a minimum to avoid zero at extreme zooms
-  const w = markerBase.width / k;
-  const h = markerBase.height / k;
-  const rx = markerBase.refX / k;
-  for (const t of EDGE_TYPES) {
-    const m = gDefs.select(`#arrow-${t}`);
-    m.attr("markerWidth", w).attr("markerHeight", h).attr("refX", rx);
-  }
-}
-
-// ---------- Zoom / Pan ----------
+/* =========== Zoom / Pan =========== */
 const zoom = d3.zoom().on("zoom", (ev) => {
   gMain.attr("transform", ev.transform);
-  resizeMarkersForZoom(ev.transform.k); // keep arrowheads constant in screen space
 });
-svg.call(zoom); // D3 zoom API. :contentReference[oaicite:1]{index=1}
+svg.call(zoom); // d3-zoom docs: transform has k/tx/ty; use for pan+zoom. :contentReference[oaicite:3]{index=3}
 
-// ---------- Main render / simulation ----------
+/* =========== Main render / simulation =========== */
 function run(edgeType = "all", query = "") {
   renderLegend();
   ensureMarkers();
-  resizeMarkersForZoom(d3.zoomTransform(svg.node()).k); // set initial marker size to current zoom
 
   const { nodes, links } = buildGraph(edgeType, query);
 
   const sim = d3.forceSimulation(nodes)
     .force("charge", d3.forceManyBody().strength(d => (d.kind === "module" ? -220 : -90)))
-    .force("link", d3.forceLink(links).id(nodeKey).distance(d => 42 + 2*Math.min(d.source.degree,d.target.degree)).strength(0.35))
+    .force("link", d3.forceLink(links).id(nodeKey).distance(d => 42 + 2*Math.min(d.source.degree,d.target.degree)).strength(0.35)) // id accessor: JSON-friendly. :contentReference[oaicite:4]{index=4}
     .force("collide", d3.forceCollide().radius(d => 4 + Math.sqrt(2 + d.degree)).iterations(2))
     .force("x", d3.forceX().strength(0.06))
     .force("y", d3.forceY().strength(0.06));
 
-  // ----- joins -----
+  // --- joins ---
   const linkSel = gLinks.selectAll("line").data(links, d => d.source.id + "→" + d.target.id + ":" + d.etype);
   linkSel.exit().remove();
   const linkEnter = linkSel.enter().append("line")
@@ -200,12 +202,12 @@ function run(edgeType = "all", query = "") {
   nodeSel.exit().remove();
   const nodeEnter = nodeSel.enter().append("circle")
     .attr("class", "node")
-    .attr("r", d => 3 + Math.sqrt(1 + d.degree))
+    .attr("r", d => nodeRadius(d))
     .attr("fill", d => colorByKind(d.kind))
     .attr("stroke", "#0b0e12")
     .attr("stroke-width", 0.75)
     .call(
-      d3.drag()
+      d3.drag() // drag behavior. :contentReference[oaicite:5]{index=5}
         .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.2).restart(); d.fx = d.x; d.fy = d.y; })
         .on("drag",  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
         .on("end",   (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
@@ -225,7 +227,7 @@ function run(edgeType = "all", query = "") {
     .text(d => d.name || d.id)
     .merge(labelSel);
 
-  // ----- neighbor highlighting -----
+  // --- neighbor highlighting ---
   const neighbors = getNeighborsMap(links);
   function getNeighborsMap(links) {
     const nb = new Map();
@@ -250,7 +252,7 @@ function run(edgeType = "all", query = "") {
     label.attr("opacity", labelsToggle.checked ? 1 : 0);
   }
 
-  // ----- side panel info -----
+  // --- panel info ---
   function showInfo(d, links) {
     const incoming = links.filter(l => l.target.id === d.id);
     const outgoing = links.filter(l => l.source.id === d.id);
@@ -273,11 +275,34 @@ function run(edgeType = "all", query = "") {
   function countByType(arr){ const m = Object.create(null); for (const l of arr) m[l.etype]=(m[l.etype]||0)+1; return m; }
   function escapeHtml(s){return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 
-  // ----- ticks -----
+  // --- ticks: shorten links to node boundary so arrows don't sit under nodes ---
+  const ARROW_GAP = 2; // extra clearance from the node outline
   sim.on("tick", () => {
     link
-      .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
-      .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+      .attr("x1", d => {
+        const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+        const L = Math.hypot(dx, dy) || 1;
+        const ox = (dx / L) * (nodeRadius(d.source) + ARROW_GAP);
+        return d.source.x + ox;
+      })
+      .attr("y1", d => {
+        const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+        const L = Math.hypot(dx, dy) || 1;
+        const oy = (dy / L) * (nodeRadius(d.source) + ARROW_GAP);
+        return d.source.y + oy;
+      })
+      .attr("x2", d => {
+        const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+        const L = Math.hypot(dx, dy) || 1;
+        const ox = (dx / L) * (nodeRadius(d.target) + ARROW_GAP);
+        return d.target.x - ox;
+      })
+      .attr("y2", d => {
+        const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+        const L = Math.hypot(dx, dy) || 1;
+        const oy = (dy / L) * (nodeRadius(d.target) + ARROW_GAP);
+        return d.target.y - oy;
+      });
 
     node.attr("cx", d => d.x).attr("cy", d => d.y);
     label.attr("x", d => d.x).attr("y", d => d.y);
@@ -285,7 +310,7 @@ function run(edgeType = "all", query = "") {
 
   label.attr("opacity", labelsToggle.checked ? 1 : 0);
 
-  // Fit view after a brief settle; resize markers to the new zoom afterwards
+  // Fit view after a brief settle
   if (nodes.length) {
     setTimeout(() => {
       const [minX, minY, maxX, maxY] = extentXY(nodes);
@@ -298,8 +323,7 @@ function run(edgeType = "all", query = "") {
         .call(zoom.transform, d3.zoomIdentity
           .translate(CW/2, CH/2)
           .scale(k)
-          .translate(-(vb[0]+vb[2]/2), -(vb[1]+vb[3]/2)))
-        .on("end", () => resizeMarkersForZoom(d3.zoomTransform(svg.node()).k));
+          .translate(-(vb[0]+vb[2]/2), -(vb[1]+vb[3]/2)));
     }, 300);
   }
 }
@@ -310,10 +334,10 @@ function extentXY(nodes){
   return [minX,minY,maxX,maxY];
 }
 
-// ---------- Wire up controls ----------
+/* =========== Controls =========== */
 edgeTypeSel.addEventListener("change", () => run(edgeTypeSel.value, filterInput.value));
 filterInput.addEventListener("input", d3.debounce?.(()=>run(edgeTypeSel.value, filterInput.value), 200) || (()=>run(edgeTypeSel.value, filterInput.value)));
 labelsToggle.addEventListener("change", () => run(edgeTypeSel.value, filterInput.value));
 
-// Boot
+/* =========== Boot =========== */
 run(edgeTypeSel.value, filterInput.value);
