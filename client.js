@@ -37,13 +37,18 @@ function colorByKind(kind) {
 }
 const colorByType = (t) => EDGE_COLORS[t] || "#999";
 
+/* =========== Small utilities =========== */
+function debounce(fn, wait = 200) {
+  let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), wait); };
+}
+
 /* =========== Data =========== */
 const deps = await fetch("./deps.json").then(r => r.json());
 
 /* =========== DOM refs & layers =========== */
 const svg = d3.select("#viz");
 const gMain   = svg.append("g");
-/* Order: links ABOVE nodes so strokes sit over the node’s white hover ring */
+/* Order: links above nodes so strokes sit over the node’s white hover ring */
 const gLinks  = gMain.append("g");
 const gNodes  = gMain.append("g");
 const gArrows = gMain.append("g");   // arrow overlay above nodes
@@ -170,20 +175,35 @@ function buildGraph(edgeType, query) {
 /* =========== Zoom / Pan =========== */
 let zoomK = 1;               // current zoom (for screen-constant arrows)
 let onZoomRepaint = null;    // assigned by run() to refresh arrows immediately
-const zoom = d3.zoom().on("zoom", (ev) => {
-  zoomK = ev.transform.k;
-  gMain.attr("transform", ev.transform);
-  if (onZoomRepaint) onZoomRepaint(); // keep arrows sized/positioned on pan/zoom
-});
+let rafQueued = false;
+const rafRepaint = () => {
+  if (rafQueued) return;
+  rafQueued = true;
+  requestAnimationFrame(() => { rafQueued = false; onZoomRepaint && onZoomRepaint(); });
+};
+
+/* Disable zoom while typing in search or when pointer is on a node. */
+const zoom = d3.zoom()
+  .filter((event) => {
+    if (document.activeElement === filterInput) return false;
+    const target = event.target;
+    return !(target && target.closest && target.closest(".node"));
+  }) // official zoom filter hook. :contentReference[oaicite:2]{index=2}
+  .on("zoom", (ev) => {
+    zoomK = ev.transform.k;
+    gMain.attr("transform", ev.transform);
+    rafRepaint(); // throttle to rAF for smoothness. :contentReference[oaicite:3]{index=3}
+  });
 svg.call(zoom);
 
 /* Track the current simulation so we can stop it on rerun */
 let currentSim = null;
+/* Whether the info panel is pinned (click to pin/unpin) */
+let infoPinned = false;
 
 /* =========== Main render / simulation =========== */
 function run(edgeType = "all", query = "") {
-  // stop any previous simulation to avoid competing ticks
-  if (currentSim) currentSim.stop();
+  if (currentSim) currentSim.stop(); // prevent competing ticks
 
   renderEdgeLegend();
   renderNodeKindLegend();
@@ -214,21 +234,21 @@ function run(edgeType = "all", query = "") {
     .attr("fill", d => colorByKind(d.kind))
     .attr("stroke", "#0b0e12")
     .attr("stroke-width", 0.75)
-    // Ensure drag always wins over zoom: block the initial pointerdown and dragstart. 
-    .on("pointerdown", (ev) => ev.stopPropagation())
+    .on("pointerdown", (ev) => ev.stopPropagation())  // drag wins over zoom. :contentReference[oaicite:4]{index=4}
     .call(
       d3.drag()
         .on("start", (ev, d) => {
-          ev.sourceEvent?.stopPropagation(); // also guard older patterns
+          ev.sourceEvent?.stopPropagation();
           if (!ev.active) sim.alphaTarget(0.2).restart();
           d.fx = d.x; d.fy = d.y;
         })
         .on("drag",  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
         .on("end",   (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
     )
-    .on("mouseenter", (_, d) => showInfo(d, links))
-    .on("mouseleave", () => clearHighlight())
-    .on("mousemove", (ev, d) => maybeHighlight(d));
+    .on("mouseenter", (_, d) => { if (!infoPinned) showInfo(d, links); })
+    .on("mousemove", (ev, d) => maybeHighlight(d))
+    .on("mouseleave", () => { if (!infoPinned) clearHighlight(); })
+    .on("click", (_, d) => { infoPinned = !infoPinned; if (infoPinned) showInfo(d, links); });
   const node = nodeEnter.merge(nodeSel);
 
   // Arrowheads as overlay triangles (above nodes)
@@ -273,6 +293,43 @@ function run(edgeType = "all", query = "") {
     label.attr("opacity", labelsToggle.checked ? 1 : 0);
   }
 
+  // --- info panel (elegant card) ---
+  function showInfo(d, links) {
+    const incoming = links.filter(l => l.target.id === d.id);
+    const outgoing = links.filter(l => l.source.id === d.id);
+
+    const counts = (arr) => {
+      const m = new Map(); for (const l of arr) m.set(l.etype, (m.get(l.etype)||0)+1); return m;
+    };
+    const inBy = counts(incoming), outBy = counts(outgoing);
+
+    const badge = (txt) => `<span class="badge">${txt}</span>`;
+    const chip  = (txt) => `<span class="chip">${txt}</span>`;
+    const dot   = (t) => `<span class="dot" style="background:${colorByType(t)}"></span>`;
+
+    const sig = [
+      d.result ? `${d.result}` : null,
+      Array.isArray(d.dummies) && d.dummies.length ? `(${d.dummies.map(x => x.name || x).join(", ")})` : null
+    ].filter(Boolean).join(" ");
+
+    const fileLine = d.file ? `${d.file}${d.line ? `:${d.line}` : ""}` : "";
+
+    info.innerHTML = `
+      <div class="info-title">${d.name || d.id}</div>
+      <div class="row">
+        ${d.kind ? badge(d.kind) : ""} ${d.scope ? badge(`scope: ${d.scope}`) : ""} ${d.visibility ? badge(d.visibility) : ""}
+      </div>
+      ${sig ? `<div class="row" style="margin-top:6px"><span class="kv">signature:</span> ${chip(sig)}</div>` : ""}
+      ${fileLine ? `<div class="row" style="margin-top:6px"><span class="kv">location:</span> ${chip(fileLine)}</div>` : ""}
+      <div class="counts">
+        ${EDGE_TYPES.map(t => `
+          <div>${dot(t)}in ${t}</div><div>${inBy.get(t) || 0}</div>
+          <div>${dot(t)}out ${t}</div><div>${outBy.get(t) || 0}</div>
+        `).join("")}
+      </div>
+    `;
+  }
+
   // --- geometry helpers (used by tick & zoom repaint) ---
   function endpoints(d) {
     // REVERSED DIRECTION: line drawn TARGET → SOURCE
@@ -290,42 +347,40 @@ function run(edgeType = "all", query = "") {
   }
 
   function arrowPath(d, ends) {
-    const { x2, ux, uy } = ends;
     const ARW   = 6 / zoomK;     // length (screen-constant)
     const HALF  = 3.6 / zoomK;   // half width
-    const bx = x2 - ux * ARW;
-    const by = ends.y2 - uy * ARW;
-    const px = -uy, py = ux;
+    const bx = ends.x2 - ends.ux * ARW;
+    const by = ends.y2 - ends.uy * ARW;
+    const px = -ends.uy, py = ends.ux;
 
     const b1x = bx + px * HALF, b1y = by + py * HALF;
     const b2x = bx - px * HALF, b2y = by - py * HALF;
     return `M${ends.x2},${ends.y2} L${b1x},${b1y} L${b2x},${b2y} Z`;
   }
 
-  // Single repaint used by both tick and zoom:
   function repaint() {
     // links & arrows
     link
-      .attr("x1", d => {
-        const e = (d._e = endpoints(d));
-        return e.x1;
-      })
+      .attr("x1", d => { const e = (d._e = endpoints(d)); return e.x1; })
       .attr("y1", d => d._e.y1)
       .attr("x2", d => d._e.x2)
       .attr("y2", d => d._e.y2);
-
     arrow.attr("d", d => arrowPath(d, d._e));
 
-    // nodes & labels (these were missing before)
+    // nodes & labels
     node.attr("cx", d => d.x).attr("cy", d => d.y);
     label.attr("x", d => d.x).attr("y", d => d.y);
   }
 
-  // --- ticks & immediate zoom repaint ---
   sim.on("tick", repaint);
   onZoomRepaint = repaint;
 
   label.attr("opacity", labelsToggle.checked ? 1 : 0);
+
+  // click on empty background to unpin
+  svg.on("click", (ev) => {
+    if (ev.target === svg.node()) { infoPinned = false; }
+  });
 
   // Fit view after a brief settle
   if (nodes.length) {
@@ -353,8 +408,7 @@ function extentXY(nodes){
 
 /* =========== Controls =========== */
 edgeTypeSel.addEventListener("change", () => run(edgeTypeSel.value, filterInput.value));
-filterInput.addEventListener("input",
-  d3.debounce?.(()=>run(edgeTypeSel.value, filterInput.value), 200) || (()=>run(edgeTypeSel.value, filterInput.value)));
+filterInput.addEventListener("input", debounce(() => run(edgeTypeSel.value, filterInput.value), 200));
 labelsToggle.addEventListener("change", () => run(edgeTypeSel.value, filterInput.value));
 
 /* =========== Boot =========== */

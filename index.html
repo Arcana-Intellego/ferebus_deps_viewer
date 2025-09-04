@@ -18,12 +18,23 @@
   #legend label, #legendKinds label { display:flex; align-items:center; gap:8px; user-select:none; }
   .swatch { width:14px; height:14px; border-radius:3px; display:inline-block; }
   .disabled { opacity:0.35; }
+
   svg { width:100%; height:100%; display:block; touch-action: none; }
-  .link { stroke-opacity:.28; vector-effect: non-scaling-stroke; pointer-events: none; } /* stroke color set in JS */
+  .link { stroke-opacity:.28; vector-effect: non-scaling-stroke; pointer-events: none; } /* color set in JS */
   .link.highlight { stroke-opacity:.95; }
   .node { cursor:grab; }
   .node:hover { stroke:#fff; stroke-width:1.5px; }
   .label { pointer-events:none; font-size:10px; fill:#cbd5e1; text-shadow: 0 1px 2px #000; opacity:.85 }
+
+  /* info card */
+  .info-card { background:#0f1319; border:1px solid #1b222e; border-radius:8px; padding:10px; margin-top:8px; }
+  .info-title { font-weight:700; font-size:14px; margin:0 0 4px; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .badge { font-size:11px; padding:2px 6px; border-radius:999px; border:1px solid #2a3140; background:#0d1218; color:#dbe3ef; }
+  .chip { font-size:11px; padding:2px 6px; border-radius:5px; border:1px solid #2a3140; background:#0d1218; color:#cfd8e3; }
+  .kv { color:#aab4c3; }
+  .counts { display:grid; grid-template-columns: auto auto; gap:6px 12px; margin-top:6px; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:6px; }
 </style>
 
 <div id="app">
@@ -59,8 +70,8 @@
     <div class="muted" style="margin-top:10px">Node kinds:</div>
     <div id="legendKinds"></div>
 
-    <div class="muted" style="margin-top:10px">Hover a node to see details</div>
-    <div id="info" style="margin-top:8px;"></div>
+    <div class="muted" style="margin-top:10px">Hover a node to see details (click to pin)</div>
+    <div id="info" class="info-card"></div>
   </aside>
 
   <svg id="viz"></svg>
