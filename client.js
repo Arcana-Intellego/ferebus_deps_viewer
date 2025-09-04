@@ -37,6 +37,10 @@ function colorByKind(kind) {
 }
 const colorByType = (t) => EDGE_COLORS[t] || "#999";
 
+/* =========== Directional sizing option (Option 1 only) =========== */
+/** Set how nodes are sized: "in" | "out" | "both" (in+out). */
+const SIZE_MODE = "in";
+
 /* =========== Small utilities =========== */
 function debounce(fn, wait = 200) {
   let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), wait); };
@@ -132,7 +136,14 @@ function filterNodes(nodes, q) {
   );
 }
 
-function nodeRadius(d) { return 3 + Math.sqrt(1 + (d.degree || 0)); }
+// nodeRadius now depends on directional degree (computed in buildGraph)
+function nodeRadius(d) {
+  const k = SIZE_MODE === "in"  ? (d.degIn  || 0)
+          : SIZE_MODE === "out" ? (d.degOut || 0)
+          : (d.degIn || 0) + (d.degOut || 0);
+  // gentle sqrt scale; minimum padding
+  return 4 + Math.sqrt(2 + k);
+}
 
 function buildGraph(edgeType, query) {
   const nodesById = new Map(deps.nodes.map(n => [n.id, { ...n }]));
@@ -161,7 +172,11 @@ function buildGraph(edgeType, query) {
   for (const l of filtered) { used.add(l.source.id); used.add(l.target.id); }
   const nodes = [...used].map(id => nodesById.get(id));
 
-  // degree for sizing
+  // degree for sizing (directional): initialize and count
+  for (const n of nodes) { n.degIn = 0; n.degOut = 0; }
+  for (const l of filtered) { l.source.degOut++; l.target.degIn++; }
+
+  // (kept for other heuristics) undirected degree
   const deg = new Map([...used].map(id => [id, 0]));
   for (const l of filtered) {
     deg.set(l.source.id, (deg.get(l.source.id)||0)+1);
@@ -188,11 +203,11 @@ const zoom = d3.zoom()
     if (document.activeElement === filterInput) return false;
     const target = event.target;
     return !(target && target.closest && target.closest(".node"));
-  }) // official zoom filter hook. :contentReference[oaicite:2]{index=2}
+  }) // zoom filter hook
   .on("zoom", (ev) => {
     zoomK = ev.transform.k;
     gMain.attr("transform", ev.transform);
-    rafRepaint(); // throttle to rAF for smoothness. :contentReference[oaicite:3]{index=3}
+    rafRepaint(); // repaint arrows at this zoom
   });
 svg.call(zoom);
 
@@ -212,10 +227,14 @@ function run(edgeType = "all", query = "") {
 
   const sim = d3.forceSimulation(nodes)
     .force("charge", d3.forceManyBody().strength(d => (d.kind === "module" ? -300 : -140)))
-    .force("link", d3.forceLink(links).id(nodeKey).distance(d => 42 + 2*Math.min(d.source.degree,d.target.degree)).strength(0.15))
-    .force("collide", d3.forceCollide().radius(d => 6 + Math.sqrt(2 + d.degree)).iterations(2))
-    .force("x", d3.forceX().strength(0.00))
-    .force("y", d3.forceY().strength(0.00));
+    .force("link", d3.forceLink(links).id(nodeKey)
+      .distance(d => 70 + 2*Math.min(d.source.degree,d.target.degree))
+      .strength(0.15))
+    // IMPORTANT: collide radius respects nodeRadius so circles don't overlap. :contentReference[oaicite:1]{index=1}
+    .force("collide", d3.forceCollide().radius(d => nodeRadius(d) + 2).iterations(2))
+    // If you kept these, they remain; otherwise you can remove to avoid center pull.
+    .force("x", d3.forceX().strength(0.03))
+    .force("y", d3.forceY().strength(0.03));
   currentSim = sim;
 
   // --- joins ---
@@ -234,7 +253,7 @@ function run(edgeType = "all", query = "") {
     .attr("fill", d => colorByKind(d.kind))
     .attr("stroke", "#0b0e12")
     .attr("stroke-width", 0.75)
-    .on("pointerdown", (ev) => ev.stopPropagation())  // drag wins over zoom. :contentReference[oaicite:4]{index=4}
+    .on("pointerdown", (ev) => ev.stopPropagation())  // drag wins over zoom
     .call(
       d3.drag()
         .on("start", (ev, d) => {
@@ -360,22 +379,22 @@ function run(edgeType = "all", query = "") {
 
   function repaint() {
     // links & arrows
-    link
+    gLinks.selectAll("line")
       .attr("x1", d => { const e = (d._e = endpoints(d)); return e.x1; })
       .attr("y1", d => d._e.y1)
       .attr("x2", d => d._e.x2)
       .attr("y2", d => d._e.y2);
-    arrow.attr("d", d => arrowPath(d, d._e));
+    gArrows.selectAll("path").attr("d", d => arrowPath(d, d._e));
 
     // nodes & labels
-    node.attr("cx", d => d.x).attr("cy", d => d.y);
-    label.attr("x", d => d.x).attr("y", d => d.y);
+    gNodes.selectAll("circle").attr("cx", d => d.x).attr("cy", d => d.y);
+    gLabels.selectAll("text").attr("x", d => d.x).attr("y", d => d.y);
   }
 
   sim.on("tick", repaint);
   onZoomRepaint = repaint;
 
-  label.attr("opacity", labelsToggle.checked ? 1 : 0);
+  gLabels.selectAll("text").attr("opacity", labelsToggle.checked ? 1 : 0);
 
   // click on empty background to unpin
   svg.on("click", (ev) => {
@@ -413,3 +432,4 @@ labelsToggle.addEventListener("change", () => run(edgeTypeSel.value, filterInput
 
 /* =========== Boot =========== */
 run(edgeTypeSel.value, filterInput.value);
+
