@@ -19,8 +19,8 @@
   .swatch { width:14px; height:14px; border-radius:3px; display:inline-block; }
   .disabled { opacity:0.35; }
   svg { width:100%; height:100%; display:block; touch-action: none; }
-  .link { stroke-opacity:.28; vector-effect: non-scaling-stroke; } /* color set in JS */
-  .link.highlight { stroke-opacity:.95; } /* raise opacity, keep color */
+  .link { stroke-opacity:.28; vector-effect: non-scaling-stroke; pointer-events: none; } /* color set in JS; never block drag */
+  .link.highlight { stroke-opacity:.95; }
   .node { cursor:grab; }
   .node:hover { stroke:#fff; stroke-width:1.5px; }
   .label { pointer-events:none; font-size:10px; fill:#cbd5e1; text-shadow: 0 1px 2px #000; opacity:.85 }
@@ -67,3 +67,4 @@
 </div>
 
 <script type="module" src="./bundle.js"></script>
+

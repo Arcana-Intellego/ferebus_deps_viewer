@@ -43,9 +43,10 @@ const deps = await fetch("./deps.json").then(r => r.json());
 /* =========== DOM refs & layers =========== */
 const svg = d3.select("#viz");
 const gMain   = svg.append("g");
-const gLinks  = gMain.append("g");   // under nodes
-const gNodes  = gMain.append("g");   // nodes above links
-const gArrows = gMain.append("g");   // arrowhead overlay above nodes
+/* Order matters: links above nodes so strokes sit over the node’s white hover ring */
+const gLinks  = gMain.append("g");
+const gNodes  = gMain.append("g");
+const gArrows = gMain.append("g");   // arrow overlay above nodes
 const gLabels = gMain.append("g");   // labels on top
 
 const info   = document.querySelector("#info");
@@ -171,12 +172,15 @@ function buildGraph(edgeType, query) {
 }
 
 /* =========== Zoom / Pan =========== */
-let zoomK = 1; // keep current zoom to size arrowheads in screen px
+let zoomK = 1;               // current zoom (for screen-constant arrows)
+let onZoomRepaint = null;    // set by run() to refresh arrows immediately
+
 const zoom = d3.zoom().on("zoom", (ev) => {
   zoomK = ev.transform.k;
   gMain.attr("transform", ev.transform);
+  if (onZoomRepaint) onZoomRepaint(); // recompute arrow paths at this zoom
 });
-svg.call(zoom);
+svg.call(zoom);  // d3-zoom behavior docs. :contentReference[oaicite:2]{index=2}
 
 /* =========== Main render / simulation =========== */
 function run(edgeType = "all", query = "") {
@@ -192,10 +196,7 @@ function run(edgeType = "all", query = "") {
     .force("x", d3.forceX().strength(0.06))
     .force("y", d3.forceY().strength(0.06));
 
-  // --- joins ---
-  const keyLink = d => d.source.id + "→" + d.target.id + ":" + d.etype;
-
-  const linkSel = gLinks.selectAll("line").data(links, keyLink);
+  const linkSel = gLinks.selectAll("line").data(links, d => d.source.id + "→" + d.target.id + ":" + d.etype);
   linkSel.exit().remove();
   const linkEnter = linkSel.enter().append("line")
     .attr("class", "link")
@@ -211,10 +212,13 @@ function run(edgeType = "all", query = "") {
     .attr("fill", d => colorByKind(d.kind))
     .attr("stroke", "#0b0e12")
     .attr("stroke-width", 0.75)
+    // Stop the initial pointerdown from bubbling to the zoom, so drag always wins
+    // (D3 drag doesn’t stop propagation for you by default). :contentReference[oaicite:3]{index=3}
+    .on("pointerdown", (ev) => ev.stopPropagation())
     .call(
       d3.drag()
         .on("start", (ev, d) => {
-          ev.sourceEvent?.stopPropagation(); // don't let drag trigger zoom pan
+          ev.sourceEvent?.stopPropagation(); // belt & braces; works with older patterns. :contentReference[oaicite:4]{index=4}
           if (!ev.active) sim.alphaTarget(0.2).restart();
           d.fx = d.x; d.fy = d.y;
         })
@@ -228,10 +232,10 @@ function run(edgeType = "all", query = "") {
   const node = nodeEnter.merge(nodeSel);
 
   // Arrowheads as overlay triangles (above nodes), one per link
-  const arrowSel = gArrows.selectAll("path").data(links, keyLink);
+  const arrowSel = gArrows.selectAll("path").data(links, d => d.source.id + "→" + d.target.id + ":" + d.etype);
   arrowSel.exit().remove();
   const arrow = arrowSel.enter().append("path")
-    .attr("pointer-events", "none") // let mouse interactions hit nodes/links beneath
+    .attr("pointer-events", "none")
     .merge(arrowSel)
     .attr("fill", d => colorByType(d.etype));
 
@@ -291,66 +295,48 @@ function run(edgeType = "all", query = "") {
   function countByType(arr){ const m = Object.create(null); for (const l of arr) m[l.etype]=(m[l.etype]||0)+1; return m; }
   function escapeHtml(s){return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 
-  // --- ticks ---
-  sim.on("tick", () => {
-    // REVERSED DIRECTION: draw line from TARGET → SOURCE
+  // --- geometry helpers (reused by tick & zoom repaint) ---
+  function endpoints(d) {
+    // REVERSED DIRECTION: line drawn TARGET → SOURCE
+    const vx = d.source.x - d.target.x;
+    const vy = d.source.y - d.target.y;
+    const L  = Math.hypot(vx, vy) || 1;
+    const ux = vx / L, uy = vy / L;
+
+    const x1 = d.target.x + ux * nodeRadius(d.target);
+    const y1 = d.target.y + uy * nodeRadius(d.target);
+    const x2 = d.source.x - ux * nodeRadius(d.source);
+    const y2 = d.source.y - uy * nodeRadius(d.source);
+
+    return { x1, y1, x2, y2, ux, uy };
+  }
+
+  function arrowPath(d) {
+    const { x2, y2, ux, uy } = endpoints(d);
+    const ARW   = 6 / zoomK;     // length
+    const HALF  = 3.6 / zoomK;   // half width
+    const bx = x2 - ux * ARW;
+    const by = y2 - uy * ARW;
+    const px = -uy, py = ux;
+
+    const b1x = bx + px * HALF, b1y = by + py * HALF;
+    const b2x = bx - px * HALF, b2y = by - py * HALF;
+    return `M${x2},${y2} L${b1x},${b1y} L${b2x},${b2y} Z`;
+  }
+
+  function repaint() {
     link
-      .attr("x1", d => {
-        const dx = d.source.x - d.target.x, dy = d.source.y - d.target.y;
-        const L = Math.hypot(dx, dy) || 1;
-        return d.target.x + (dx / L) * nodeRadius(d.target);
-      })
-      .attr("y1", d => {
-        const dx = d.source.x - d.target.x, dy = d.source.y - d.target.y;
-        const L = Math.hypot(dx, dy) || 1;
-        return d.target.y + (dy / L) * nodeRadius(d.target);
-      })
-      .attr("x2", d => {
-        const dx = d.source.x - d.target.x, dy = d.source.y - d.target.y;
-        const L = Math.hypot(dx, dy) || 1;
-        return d.source.x - (dx / L) * nodeRadius(d.source);
-      })
-      .attr("y2", d => {
-        const dx = d.source.x - d.target.x, dy = d.source.y - d.target.y;
-        const L = Math.hypot(dx, dy) || 1;
-        return d.source.y - (dy / L) * nodeRadius(d.source);
-      });
+      .attr("x1", d => endpoints(d).x1)
+      .attr("y1", d => endpoints(d).y1)
+      .attr("x2", d => endpoints(d).x2)
+      .attr("y2", d => endpoints(d).y2);
 
-    // Arrowheads: draw small triangle at the line end (toward SOURCE), above nodes.
-    // Keep constant screen size: scale by 1/zoomK.
-    const ARW = 6 / zoomK;       // triangle length in graph units
-    const ARW_W = 3.6 / zoomK;   // half width
+    arrow.attr("d", arrowPath);
+  }
 
-    arrow
-      .attr("d", d => {
-        // direction from target -> source
-        const vx = d.source.x - d.target.x;
-        const vy = d.source.y - d.target.y;
-        const L = Math.hypot(vx, vy) || 1;
-        const ux = vx / L, uy = vy / L;
-
-        // tip at source boundary (kissing the node)
-        const tipX = d.source.x - ux * nodeRadius(d.source);
-        const tipY = d.source.y - uy * nodeRadius(d.source);
-
-        // base center a bit back along the edge
-        const baseX = tipX - ux * ARW;
-        const baseY = tipY - uy * ARW;
-
-        // perpendicular
-        const px = -uy, py = ux;
-
-        const b1x = baseX + px * ARW_W;
-        const b1y = baseY + py * ARW_W;
-        const b2x = baseX - px * ARW_W;
-        const b2y = baseY - py * ARW_W;
-
-        return `M${tipX},${tipY} L${b1x},${b1y} L${b2x},${b2y} Z`;
-      });
-
-    node.attr("cx", d => d.x).attr("cy", d => d.y);
-    label.attr("x", d => d.x).attr("y", d => d.y);
-  });
+  // --- ticks & immediate zoom repaint ---
+  sim.on("tick", repaint);
+  onZoomRepaint = repaint; // when zooming, recompute arrow size/position immediately
 
   label.attr("opacity", labelsToggle.checked ? 1 : 0);
 
@@ -380,7 +366,8 @@ function extentXY(nodes){
 
 /* =========== Controls =========== */
 edgeTypeSel.addEventListener("change", () => run(edgeTypeSel.value, filterInput.value));
-filterInput.addEventListener("input", d3.debounce?.(()=>run(edgeTypeSel.value, filterInput.value), 200) || (()=>run(edgeTypeSel.value, filterInput.value)));
+filterInput.addEventListener("input",
+  d3.debounce?.(()=>run(edgeTypeSel.value, filterInput.value), 200) || (()=>run(edgeTypeSel.value, filterInput.value)));
 labelsToggle.addEventListener("change", () => run(edgeTypeSel.value, filterInput.value));
 
 /* =========== Boot =========== */
