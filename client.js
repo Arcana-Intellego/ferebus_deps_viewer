@@ -22,7 +22,7 @@ const EDGE_COLORS = {
   "uses-type":           COLORS.purple
 };
 
-// Node palette aligned with edge semantics
+// Node palette aligned to edge semantics
 function colorByKind(kind) {
   switch ((kind || "unknown").toLowerCase()) {
     case "function":
@@ -40,13 +40,13 @@ const colorByType = (t) => EDGE_COLORS[t] || "#999";
 /* =========== Data =========== */
 const deps = await fetch("./deps.json").then(r => r.json());
 
-/* =========== DOM refs =========== */
+/* =========== DOM refs & layers =========== */
 const svg = d3.select("#viz");
-const gMain  = svg.append("g");
-const gDefs  = svg.append("defs");   // markers
-const gLinks = gMain.append("g");
-const gNodes = gMain.append("g");
-const gLabels= gMain.append("g");
+const gMain   = svg.append("g");
+const gLinks  = gMain.append("g");   // under nodes
+const gNodes  = gMain.append("g");   // nodes above links
+const gArrows = gMain.append("g");   // arrowhead overlay above nodes
+const gLabels = gMain.append("g");   // labels on top
 
 const info   = document.querySelector("#info");
 const edgeTypeSel = document.querySelector("#edgeType");
@@ -170,30 +170,10 @@ function buildGraph(edgeType, query) {
   return { nodes, links: filtered };
 }
 
-/* =========== Markers (arrowheads) =========== */
-/* We keep link strokes constant on screen via vector-effect: non-scaling-stroke.
-   Using markerUnits="strokeWidth" makes arrowheads scale with that stroke width,
-   so they also remain constant on screen with zoom. */
-function ensureMarkers() {
-  gDefs.selectAll("marker").remove();
-  for (const t of EDGE_TYPES) {
-    const m = gDefs.append("marker")
-      .attr("id", `arrow-${t}`)
-      .attr("markerUnits", "strokeWidth")
-      .attr("viewBox", "0 -3 6 6")
-      .attr("refX", 6)                // tip sits at line end
-      .attr("refY", 0)
-      .attr("markerWidth", 6)
-      .attr("markerHeight", 6)
-      .attr("orient", "auto-start-reverse"); // handle start/end automatically
-    m.append("path")
-      .attr("d", "M0,-3 L6,0 L0,3 Z")
-      .attr("fill", colorByType(t));
-  }
-}
-
 /* =========== Zoom / Pan =========== */
+let zoomK = 1; // keep current zoom to size arrowheads in screen px
 const zoom = d3.zoom().on("zoom", (ev) => {
+  zoomK = ev.transform.k;
   gMain.attr("transform", ev.transform);
 });
 svg.call(zoom);
@@ -202,7 +182,6 @@ svg.call(zoom);
 function run(edgeType = "all", query = "") {
   renderEdgeLegend();
   renderNodeKindLegend();
-  ensureMarkers();
 
   const { nodes, links } = buildGraph(edgeType, query);
 
@@ -214,17 +193,15 @@ function run(edgeType = "all", query = "") {
     .force("y", d3.forceY().strength(0.06));
 
   // --- joins ---
-  const linkSel = gLinks.selectAll("line").data(links, d => d.source.id + "→" + d.target.id + ":" + d.etype);
+  const keyLink = d => d.source.id + "→" + d.target.id + ":" + d.etype;
+
+  const linkSel = gLinks.selectAll("line").data(links, keyLink);
   linkSel.exit().remove();
   const linkEnter = linkSel.enter().append("line")
     .attr("class", "link")
     .attr("stroke-width", 1.2);
   const link = linkEnter.merge(linkSel)
-    .attr("stroke", d => colorByType(d.etype))
-    // REVERSED DIRECTION: arrow at *start* or *end*?
-    // We'll draw the path from TARGET → SOURCE and put arrow at marker-end,
-    // so the arrow points toward the SOURCE (dependent).
-    .attr("marker-end", d => `url(#arrow-${d.etype})`);
+    .attr("stroke", d => colorByType(d.etype));
 
   const nodeSel = gNodes.selectAll("circle").data(nodes, nodeKey);
   nodeSel.exit().remove();
@@ -236,7 +213,11 @@ function run(edgeType = "all", query = "") {
     .attr("stroke-width", 0.75)
     .call(
       d3.drag()
-        .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.2).restart(); d.fx = d.x; d.fy = d.y; })
+        .on("start", (ev, d) => {
+          ev.sourceEvent?.stopPropagation(); // don't let drag trigger zoom pan
+          if (!ev.active) sim.alphaTarget(0.2).restart();
+          d.fx = d.x; d.fy = d.y;
+        })
         .on("drag",  (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
         .on("end",   (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
     )
@@ -245,6 +226,14 @@ function run(edgeType = "all", query = "") {
     .on("mousemove", (ev, d) => maybeHighlight(d));
 
   const node = nodeEnter.merge(nodeSel);
+
+  // Arrowheads as overlay triangles (above nodes), one per link
+  const arrowSel = gArrows.selectAll("path").data(links, keyLink);
+  arrowSel.exit().remove();
+  const arrow = arrowSel.enter().append("path")
+    .attr("pointer-events", "none") // let mouse interactions hit nodes/links beneath
+    .merge(arrowSel)
+    .attr("fill", d => colorByType(d.etype));
 
   const labelSel = gLabels.selectAll("text").data(nodes, nodeKey);
   labelSel.exit().remove();
@@ -280,11 +269,10 @@ function run(edgeType = "all", query = "") {
     label.attr("opacity", labelsToggle.checked ? 1 : 0);
   }
 
-  // --- panel info ---
+  // --- info panel ---
   function showInfo(d, links) {
     const incoming = links.filter(l => l.target.id === d.id);
     const outgoing = links.filter(l => l.source.id === d.id);
-
     const details = {
       id: d.id, name: d.name, kind: d.kind, scope: d.scope,
       file: d.file, line: d.line, visibility: d.visibility,
@@ -303,13 +291,13 @@ function run(edgeType = "all", query = "") {
   function countByType(arr){ const m = Object.create(null); for (const l of arr) m[l.etype]=(m[l.etype]||0)+1; return m; }
   function escapeHtml(s){return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 
-  // --- ticks: draw line from TARGET → SOURCE so arrow (marker-end) points to SOURCE ---
+  // --- ticks ---
   sim.on("tick", () => {
+    // REVERSED DIRECTION: draw line from TARGET → SOURCE
     link
       .attr("x1", d => {
         const dx = d.source.x - d.target.x, dy = d.source.y - d.target.y;
         const L = Math.hypot(dx, dy) || 1;
-        // start at target boundary (no extra gap)
         return d.target.x + (dx / L) * nodeRadius(d.target);
       })
       .attr("y1", d => {
@@ -320,13 +308,44 @@ function run(edgeType = "all", query = "") {
       .attr("x2", d => {
         const dx = d.source.x - d.target.x, dy = d.source.y - d.target.y;
         const L = Math.hypot(dx, dy) || 1;
-        // end at source boundary so arrow tip kisses the source node
         return d.source.x - (dx / L) * nodeRadius(d.source);
       })
       .attr("y2", d => {
         const dx = d.source.x - d.target.x, dy = d.source.y - d.target.y;
         const L = Math.hypot(dx, dy) || 1;
         return d.source.y - (dy / L) * nodeRadius(d.source);
+      });
+
+    // Arrowheads: draw small triangle at the line end (toward SOURCE), above nodes.
+    // Keep constant screen size: scale by 1/zoomK.
+    const ARW = 6 / zoomK;       // triangle length in graph units
+    const ARW_W = 3.6 / zoomK;   // half width
+
+    arrow
+      .attr("d", d => {
+        // direction from target -> source
+        const vx = d.source.x - d.target.x;
+        const vy = d.source.y - d.target.y;
+        const L = Math.hypot(vx, vy) || 1;
+        const ux = vx / L, uy = vy / L;
+
+        // tip at source boundary (kissing the node)
+        const tipX = d.source.x - ux * nodeRadius(d.source);
+        const tipY = d.source.y - uy * nodeRadius(d.source);
+
+        // base center a bit back along the edge
+        const baseX = tipX - ux * ARW;
+        const baseY = tipY - uy * ARW;
+
+        // perpendicular
+        const px = -uy, py = ux;
+
+        const b1x = baseX + px * ARW_W;
+        const b1y = baseY + py * ARW_W;
+        const b2x = baseX - px * ARW_W;
+        const b2y = baseY - py * ARW_W;
+
+        return `M${tipX},${tipY} L${b1x},${b1y} L${b2x},${b2y} Z`;
       });
 
     node.attr("cx", d => d.x).attr("cy", d => d.y);
