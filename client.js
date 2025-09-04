@@ -230,7 +230,7 @@ function run(edgeType = "all", query = "") {
     .force("link", d3.forceLink(links).id(nodeKey)
       .distance(d => 70 + 2*Math.min(d.source.degree,d.target.degree))
       .strength(0.15))
-    // IMPORTANT: collide radius respects nodeRadius so circles don't overlap. :contentReference[oaicite:1]{index=1}
+    // IMPORTANT: collide radius respects nodeRadius so circles don't overlap.
     .force("collide", d3.forceCollide().radius(d => nodeRadius(d) + 2).iterations(2))
     // If you kept these, they remain; otherwise you can remove to avoid center pull.
     .force("x", d3.forceX().strength(0.03))
@@ -249,7 +249,7 @@ function run(edgeType = "all", query = "") {
   nodeSel.exit().remove();
   const nodeEnter = nodeSel.enter().append("circle")
     .attr("class", "node")
-    .attr("r", d => nodeRadius(d))
+    .attr("r", d => nodeRadius(d)) // initial
     .attr("fill", d => colorByKind(d.kind))
     .attr("stroke", "#0b0e12")
     .attr("stroke-width", 0.75)
@@ -268,7 +268,10 @@ function run(edgeType = "all", query = "") {
     .on("mousemove", (ev, d) => maybeHighlight(d))
     .on("mouseleave", () => { if (!infoPinned) clearHighlight(); })
     .on("click", (_, d) => { infoPinned = !infoPinned; if (infoPinned) showInfo(d, links); });
-  const node = nodeEnter.merge(nodeSel);
+
+// 🔧 Minimal fix: update radius on the MERGED selection so existing nodes resize too.
+  const node = nodeEnter.merge(nodeSel)
+    .attr("r", d => nodeRadius(d));
 
   // Arrowheads as overlay triangles (above nodes)
   const arrowSel = gArrows.selectAll("path").data(links, d => d.source.id + "→" + d.target.id + ":" + d.etype);
@@ -432,4 +435,5 @@ labelsToggle.addEventListener("change", () => run(edgeTypeSel.value, filterInput
 
 /* =========== Boot =========== */
 run(edgeTypeSel.value, filterInput.value);
+
 
