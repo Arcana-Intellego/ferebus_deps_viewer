@@ -172,9 +172,15 @@ function buildGraph(edgeType, query) {
   for (const l of filtered) { used.add(l.source.id); used.add(l.target.id); }
   const nodes = [...used].map(id => nodesById.get(id));
 
-  // degree for sizing (directional): initialize and count
+  /* ------------------ Directional degree counts (visual) ------------------
+     We draw arrows REVERSED (target → source) so the arrowhead touches the
+     SOURCE node on screen. To size by *visual* inbound (arrows flowing into
+     a node on screen), we count:
+       - degIn  := #links where node === source   (arrowheads touch here)
+       - degOut := #links where node === target   (arrows leave this node)
+     ---------------------------------------------------------------------- */
   for (const n of nodes) { n.degIn = 0; n.degOut = 0; }
-  for (const l of filtered) { l.source.degOut++; l.target.degIn++; }
+  for (const l of filtered) { l.source.degIn++; l.target.degOut++; }
 
   // (kept for other heuristics) undirected degree
   const deg = new Map([...used].map(id => [id, 0]));
@@ -269,7 +275,7 @@ function run(edgeType = "all", query = "") {
     .on("mouseleave", () => { if (!infoPinned) clearHighlight(); })
     .on("click", (_, d) => { infoPinned = !infoPinned; if (infoPinned) showInfo(d, links); });
 
-// 🔧 Minimal fix: update radius on the MERGED selection so existing nodes resize too.
+  // 🔧 ensure existing nodes resize too on re-runs/filters
   const node = nodeEnter.merge(nodeSel)
     .attr("r", d => nodeRadius(d));
 
@@ -317,6 +323,7 @@ function run(edgeType = "all", query = "") {
 
   // --- info panel (elegant card) ---
   function showInfo(d, links) {
+    // NOTE: info counts still reflect data direction (source→target).
     const incoming = links.filter(l => l.target.id === d.id);
     const outgoing = links.filter(l => l.source.id === d.id);
 
@@ -354,7 +361,7 @@ function run(edgeType = "all", query = "") {
 
   // --- geometry helpers (used by tick & zoom repaint) ---
   function endpoints(d) {
-    // REVERSED DIRECTION: line drawn TARGET → SOURCE
+    // REVERSED DRAW DIRECTION: line drawn TARGET → SOURCE; arrowhead at SOURCE
     const vx = d.source.x - d.target.x;
     const vy = d.source.y - d.target.y;
     const L  = Math.hypot(vx, vy) || 1;
@@ -435,5 +442,3 @@ labelsToggle.addEventListener("change", () => run(edgeTypeSel.value, filterInput
 
 /* =========== Boot =========== */
 run(edgeTypeSel.value, filterInput.value);
-
-
