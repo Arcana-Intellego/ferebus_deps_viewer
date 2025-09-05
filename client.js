@@ -313,7 +313,7 @@ function run(edgeType = "all", query = "") {
     link.classed("highlight", l => l.source.id === d.id || l.target.id === d.id)
         .attr("opacity", l => (l.source.id === d.id || l.target.id === d.id) ? 0.9 : 0.12)
         .attr("stroke-width", l => (l.source.id === d.id || l.target.id === d.id) ? 2.2 : 1.2);
-    label.attr("opacity", n => (labelsToggle.checked ? ((n.id === d.id || nb.has(n.id)) ? 1 : 0.05) : 0));
+    label.attr("opacity", n => (labelsToggle.checked ? ((n.id === d.id || nb.has(n.id)) ? 1 : 0.2) : 0));
   }
   function clearHighlight() {
     node.classed("highlight", false).attr("opacity", 1);
