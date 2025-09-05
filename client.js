@@ -142,7 +142,7 @@ function nodeRadius(d) {
           : SIZE_MODE === "out" ? (d.degOut || 0)
           : (d.degIn || 0) + (d.degOut || 0);
   // gentle sqrt scale; minimum padding
-  return 4 + Math.sqrt(2 + k);
+  return 4 + 1.6*Math.sqrt(2 + k);
 }
 
 function buildGraph(edgeType, query) {
